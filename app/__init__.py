@@ -21,6 +21,9 @@ def create_app(config_name='default'):
     from app.aliexpress.controllers.product_info_controller import user_bp as aliexpress_bp
     app.register_blueprint(aliexpress_bp)
 
+    from app.core.controllers.file_controller import file_bp
+    app.register_blueprint(file_bp, url_prefix='/api/file')
+
     with app.app_context():
         db.create_all()
 

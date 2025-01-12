@@ -1,5 +1,6 @@
 from app import db
 from app.aliexpress.models.user import User
+from app.core.services.database_manager import DatabaseManager
 
 
 class UserService:

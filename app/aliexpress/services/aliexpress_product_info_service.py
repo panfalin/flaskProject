@@ -1,4 +1,5 @@
 from app.aliexpress.models.cookie import Cookie
+from app.core.services.database_manager import DatabaseManager
 
 
 class AliexpressProductInfoService:

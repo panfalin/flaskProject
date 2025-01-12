@@ -18,8 +18,8 @@ class DevelopmentConfig(BaseConfig):
     MYSQL_HOST = 'localhost'
     MYSQL_PORT = 3306
     MYSQL_USER = 'root'
-    MYSQL_PASSWORD = '123'
-    MYSQL_DB = 'ry-vue-test'
+    MYSQL_PASSWORD = '123456'
+    MYSQL_DB = 'ry-vue'
 
     SQLALCHEMY_DATABASE_URI = f'mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}'
 
