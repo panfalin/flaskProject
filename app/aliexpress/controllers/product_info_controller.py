@@ -1,8 +1,8 @@
 from flask import Blueprint, jsonify
 
 from app.aliexpress.services.aliexpress_product_info_service import AliexpressProductInfoService
-from scrapers.aliexpress.aliexpress_login_scraper import AliExpressLoginScraper
 from app.core.services.database_manager import DatabaseManager
+from scrapers.aliexpress.aliexpress_login_scraper import AliExpressLoginScraper
 
 user_bp = Blueprint('aliexpress/product/info', __name__, url_prefix='/api/aliexpress/product/info')
 

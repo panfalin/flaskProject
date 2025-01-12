@@ -3,8 +3,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
+
 from werkzeug.utils import secure_filename
-from flask import send_file
 
 from app.core.config.file_storage_config import UPLOAD_FOLDERS, ALLOWED_EXTENSIONS
 
