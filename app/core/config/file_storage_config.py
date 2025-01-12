@@ -18,14 +18,23 @@ Path(BASE_UPLOAD_PATH).mkdir(parents=True, exist_ok=True)
 UPLOAD_FOLDERS = {
     'images': os.path.join(BASE_UPLOAD_PATH, 'images'),
     'documents': os.path.join(BASE_UPLOAD_PATH, 'documents'),
+    'mindmaps': os.path.join(BASE_UPLOAD_PATH, 'mindmaps'),  # 思维导图
+    'texts': os.path.join(BASE_UPLOAD_PATH, 'texts'),        # 文本文件
     'temp': os.path.join(BASE_UPLOAD_PATH, 'temp'),
 }
 
 # 允许上传的文件类型
 ALLOWED_EXTENSIONS = {
-    'images': {'png', 'jpg', 'jpeg', 'gif'},
-    'documents': {'pdf', 'doc', 'docx', 'xls', 'xlsx'},
-    'all': {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx'}
+    'images': {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'},
+    'documents': {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'},
+    'mindmaps': {'xmind', 'mm', 'mmap', 'mindmap'},  # 思维导图文件
+    'texts': {'txt', 'md', 'markdown', 'json', 'yml', 'yaml', 'xml', 'ini', 'conf'},  # 文本文件
+    'all': {
+        'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg',
+        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+        'xmind', 'mm', 'mmap', 'mindmap',
+        'txt', 'md', 'markdown', 'json', 'yml', 'yaml', 'xml', 'ini', 'conf'
+    }
 }
 
 # 创建所有上传目录

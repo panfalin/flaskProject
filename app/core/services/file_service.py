@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
+import logging
 
 from werkzeug.utils import secure_filename
 
@@ -13,8 +14,15 @@ class FileService:
     @staticmethod
     def allowed_file(filename: str, file_type: str = 'all') -> bool:
         """检查文件类型是否允许"""
-        return '.' in filename and \
-            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS[file_type]
+        if '.' not in filename:
+            logging.warning(f"文件名中没有扩展名: {filename}")
+            return False
+            
+        ext = filename.rsplit('.', 1)[1].lower()
+        allowed = ext in ALLOWED_EXTENSIONS[file_type]
+        if not allowed:
+            logging.warning(f"文件类型不允许: {ext}, 允许的类型: {ALLOWED_EXTENSIONS[file_type]}")
+        return allowed
 
     @staticmethod
     def generate_unique_filename(original_filename: str) -> str:
@@ -39,7 +47,9 @@ class FileService:
             Tuple[bool, str]: (是否成功, 成功则返回文件路径，失败则返回错误信息)
         """
         if file and file.filename:
+            logging.info(f"尝试保存文件: {file.filename}, 类型: {file_type}")
             if not FileService.allowed_file(file.filename, file_type):
+                logging.error(f"文件类型不允许: {file.filename}")
                 return False, "文件类型不允许"
 
             filename = secure_filename(file.filename)
@@ -96,3 +106,12 @@ class FileService:
             return False, "文件不存在"
         except Exception as e:
             return False, f"文件删除失败: {str(e)}" 
+
+    @staticmethod
+    def format_size(size_in_bytes):
+        """格式化文件大小"""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size_in_bytes < 1024.0:
+                return f"{size_in_bytes:.2f} {unit}"
+            size_in_bytes /= 1024.0
+        return f"{size_in_bytes:.2f} PB" 
