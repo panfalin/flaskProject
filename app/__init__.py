@@ -24,8 +24,9 @@ def create_app(config_name='default'):
         db_manager.warm_up()
 
     # 注册蓝图
-    from app.aliexpress import product_bp
+    from app.aliexpress import product_bp, mabang_order_bp
     app.register_blueprint(product_bp)
+    app.register_blueprint(mabang_order_bp)
 
     from app.core.controllers.file_controller import file_bp
     app.register_blueprint(file_bp, url_prefix='/api/file')

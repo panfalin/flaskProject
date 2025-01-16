@@ -1,14 +1,15 @@
+from flask import Blueprint, request
 from app.aliexpress.services.product_info_service import ProductService
 from app.common.utils.response_helper import ResponseHelper
-from app.aliexpress import product_bp
 
+# 创建蓝图
+product_bp = Blueprint('aliexpress/product/info', __name__, url_prefix='/api/aliexpress/product/info')
 
 class ProductController:
     """产品控制器"""
-
-    # 创建一个类级别的服务实例
+    
     _service = ProductService()
-
+    
     @staticmethod
     @product_bp.route('/', methods=['GET'])
     def get_product_info():
