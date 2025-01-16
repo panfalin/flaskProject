@@ -1,11 +1,9 @@
 import os
-
-from dotenv import load_dotenv
-
+from flask import Flask
 from app import create_app
 
 # 加载 .env 文件中的环境变量
-load_dotenv()
+# load_dotenv()
 
 # 从环境变量获取运行模式
 config_name = os.getenv('FLASK_ENV', 'development')
