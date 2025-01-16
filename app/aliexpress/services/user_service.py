@@ -1,5 +1,5 @@
-from app import db
 from app.aliexpress.models.user import User
+from app.core.services.db import db
 
 
 class UserService:
@@ -9,14 +9,18 @@ class UserService:
 
     @staticmethod
     def get_user_by_id(user_id):
-        return User.query.get_or_404(user_id)
+        success, results = db.query()\
+            .select('*')\
+            .from_table('users')\
+            .where(id=user_id)\
+            .execute()
+        return results[0] if results else None
 
     @staticmethod
     def create_user(data):
-        user = User(name=data['name'], email=data['email'])
-        db.session.add(user)
-        db.session.commit()
-        return user
+        with db.transaction() as cursor:
+            success = db.create('users', data)
+            return success
 
     @staticmethod
     def update_user(user_id, data):

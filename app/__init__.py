@@ -1,11 +1,13 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from app.core.services.database_manager import DatabaseManager
 
 # 确保从 app.global_config 导入 global_config 字典
 from global_config.base_config import config
 
 db = SQLAlchemy()
-
+# 创建全局数据库管理器实例
+db_manager = DatabaseManager()
 
 def create_app(config_name='default'):
     app = Flask(__name__)
@@ -13,13 +15,17 @@ def create_app(config_name='default'):
     # 加载配置
     app.config.from_object(config[config_name])
 
+    # 初始化 SQLAlchemy
     db.init_app(app)
+    
+    # 初始化数据库连接池
+    with app.app_context():
+        # 预热连接池，创建初始连接
+        db_manager.warm_up()
 
-    from app.aliexpress.controllers.user_controller import user_bp
-    app.register_blueprint(user_bp)
-
-    from app.aliexpress.controllers.product_info_controller import user_bp as aliexpress_bp
-    app.register_blueprint(aliexpress_bp)
+    # 注册蓝图
+    from app.aliexpress import product_bp
+    app.register_blueprint(product_bp)
 
     from app.core.controllers.file_controller import file_bp
     app.register_blueprint(file_bp, url_prefix='/api/file')
