@@ -1,77 +1,221 @@
 import logging
 from contextlib import contextmanager
+from typing import Optional, List, Any
 
 import pymysql
 from pymysql.cursors import DictCursor
+from dbutils.pooled_db import PooledDB
 
 from app.config.mysql_config import MYSQL_CONFIG
 
 
-class DatabaseManager:
-    """
-    数据库管理器类，提供 MySQL 数据库操作的封装
+class QueryBuilder:
+    """SQL 查询构建器"""
     
-    主要功能：
-    1. 基础 CRUD 操作
-       - create: 插入单条记录
-       - read: 查询数据，支持条件查询和分页
-       - update: 更新记录
-       - delete: 删除记录
-    2. 批量操作
-       - batch_create: 批量插入数据
-    3. 自定义 SQL 执行
-       - execute_sql: 执行自定义 SQL 语句
-       
-    特点：
-    1. 使用上下文管理器自动管理数据库连接
-    2. 支持参数化查询，防止 SQL 注入
-    3. 支持多种查询条件（等值、LIKE、范围、大于）
-    4. 详细的日志记录
-    5. 统一的错误处理
+    def __init__(self, db_manager):
+        self.db_manager = db_manager  # 保存 DatabaseManager 实例
+        self.table = None
+        self.select_columns = ['*']
+        self.where_conditions = []
+        self.where_values = []
+        self.order_by_columns = []
+        self.group_by_columns = []
+        self.limit_count = None
+        self.offset_count = None
+        self.join_clauses = []
+        
+    def select(self, *columns) -> 'QueryBuilder':
+        """选择要查询的列"""
+        if columns:
+            self.select_columns = list(columns)
+        return self
     
-    Example:
-        db = DatabaseManager()
-        
-        # 基础查询
-        users = db.read('users', where={'status': 'active'})
-        
-        # 分页查询
-        page_users = db.read('users', page=1, page_size=10)
-        
-        # 自定义 SQL
-        success, results = db.execute_sql(
-            "SELECT * FROM users WHERE age > %s",
-            params=(18,)
-        )
-    """
-
-    def __init__(self, config: dict = None):
+    def from_table(self, table: str) -> 'QueryBuilder':
+        """设置查询的表名"""
+        self.table = table
+        return self
+    
+    def where(self, **conditions) -> 'QueryBuilder':
+        """添加 WHERE 条件"""
+        for column, value in conditions.items():
+            if isinstance(value, tuple) and len(value) == 2:
+                # 处理特殊操作符，如 LIKE, >, <
+                operator = value[1].upper()
+                if operator == 'LIKE':
+                    self.where_conditions.append(f"{column} LIKE %s")
+                    self.where_values.append(f"%{value[0]}%")
+                else:
+                    self.where_conditions.append(f"{column} {operator} %s")
+                    self.where_values.append(value[0])
+            else:
+                self.where_conditions.append(f"{column} = %s")
+                self.where_values.append(value)
+        return self
+    
+    def order_by(self, column: str, desc: bool = False) -> 'QueryBuilder':
+        """添加排序条件"""
+        self.order_by_columns.append(f"{column} {'DESC' if desc else 'ASC'}")
+        return self
+    
+    def group_by(self, *columns) -> 'QueryBuilder':
+        """添加分组条件"""
+        self.group_by_columns.extend(columns)
+        return self
+    
+    def limit(self, count: int, offset: int = None) -> 'QueryBuilder':
+        """添加限制条件"""
+        self.limit_count = count
+        self.offset_count = offset
+        return self
+    
+    def join(self, table: str, on: dict, join_type: str = 'INNER') -> 'QueryBuilder':
+        """添加连接查询"""
+        conditions = []
+        for left, right in on.items():
+            conditions.append(f"{left} = {right}")
+        join_clause = f"{join_type} JOIN {table} ON {' AND '.join(conditions)}"
+        self.join_clauses.append(join_clause)
+        return self
+    
+    def offset(self, offset_value: int) -> 'QueryBuilder':
         """
-        初始化数据库管理器
+        设置查询的偏移量
         
         Args:
-            config: 数据库配置字典，包含 host, user, password, db 等信息
-                   如果为 None，则使用默认配置
+            offset_value: 偏移的记录数
+            
+        Returns:
+            QueryBuilder: 查询构建器实例，支持链式调用
         """
-        self.config = config if config is not None else MYSQL_CONFIG
+        self.offset_count = offset_value
+        return self
+    
+    def build(self) -> tuple:
+        """构建 SQL 语句"""
+        if not self.table:
+            raise ValueError("No table specified")
+            
+        sql_parts = [
+            f"SELECT {', '.join(self.select_columns)}",
+            f"FROM {self.table}"
+        ]
+        
+        # 添加 JOIN 子句
+        if self.join_clauses:
+            sql_parts.extend(self.join_clauses)
+        
+        # 添加 WHERE 子句
+        if self.where_conditions:
+            sql_parts.append("WHERE " + " AND ".join(self.where_conditions))
+        
+        # 添加 GROUP BY 子句
+        if self.group_by_columns:
+            sql_parts.append("GROUP BY " + ", ".join(self.group_by_columns))
+        
+        # 添加 ORDER BY 子句
+        if self.order_by_columns:
+            sql_parts.append("ORDER BY " + ", ".join(self.order_by_columns))
+        
+        # 添加 LIMIT 和 OFFSET
+        if self.limit_count is not None:
+            sql_parts.append(f"LIMIT {self.limit_count}")
+            if self.offset_count is not None:
+                sql_parts.append(f"OFFSET {self.offset_count}")
+        
+        return " ".join(sql_parts), tuple(self.where_values)
 
-    @contextmanager
-    def connect(self):
+    def execute(self) -> tuple:
         """
-        创建数据库连接的上下文管理器
+        执行构建的查询
         
         Returns:
-            pymysql.Connection: 数据库连接对象
+            tuple: (是否成功, 结果/错误信息)
+        """
+        try:
+            sql, params = self.build()
+            return self.db_manager.execute_sql(sql, params)
+        except Exception as e:
+            return False, str(e)
+
+
+class DatabaseManager:
+    """数据库管理器类，提供 MySQL 数据库操作的封装"""
+    
+    _instance = None
+    _pool = None
+    
+    def __new__(cls, *args, **kwargs):
+        """单例模式"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self, config: dict = None):
+        """初始化连接池"""
+        if DatabaseManager._pool is None:
+            self.config = config if config is not None else MYSQL_CONFIG
+            DatabaseManager._pool = PooledDB(
+                creator=pymysql,
+                maxconnections=10,  # 最大连接数
+                mincached=2,        # 初始连接数
+                maxcached=5,        # 最大空闲连接数
+                maxshared=3,        # 最大共享连接数
+                blocking=True,      # 连接池满时是否阻塞
+                maxusage=None,      # 单个连接最大复用次数
+                setsession=[],      # 开始会话前执行的命令
+                cursorclass=DictCursor,
+                **self.config
+            )
+    
+    def get_connection(self):
+        """获取数据库连接"""
+        return DatabaseManager._pool.connection()
+    
+    @contextmanager
+    def transaction(self):
+        """
+        事务上下文管理器
+        
+        Usage:
+            with db.transaction() as cursor:
+                cursor.execute("UPDATE accounts SET balance = balance - 100 WHERE id = 1")
+                cursor.execute("UPDATE accounts SET balance = balance + 100 WHERE id = 2")
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            yield cursor
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Transaction failed: {str(e)}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+    
+    def query(self) -> QueryBuilder:
+        """
+        获取查询构建器
+        
+        Returns:
+            QueryBuilder: 查询构建器实例
             
         Usage:
-            with self.connect() as connection:
-                # 使用连接进行操作
+            results = db.query()
+                       .select('id', 'name')
+                       .from_table('users')
+                       .where(status='active')
+                       .order_by('created_at', desc=True)
+                       .limit(10)
+                       .execute()
         """
-        connection = pymysql.connect(**self.config, cursorclass=DictCursor)
-        try:
-            yield connection
-        finally:
-            connection.close()
+        return QueryBuilder(self)  # 传入 self 作为 db_manager
+    
+    def execute_builder(self, builder: QueryBuilder) -> List[dict]:
+        """执行查询构建器生成的查询"""
+        sql, params = builder.build()
+        return self.execute_sql(sql, params)[1]
 
     def create(self, table: str, data: dict) -> int:
         """
@@ -93,15 +237,17 @@ class DatabaseManager:
         columns = ', '.join(data.keys())
         placeholders = ', '.join(['%s'] * len(data))
         values = tuple(data.values())
-
         sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
 
-        with self.connect() as connection:
-            with connection.cursor() as cursor:
+        conn = self.get_connection()
+        try:
+            with conn.cursor() as cursor:
                 cursor.execute(sql, values)
-                connection.commit()
+                conn.commit()
                 logging.info(f"Inserted data into {table}: {data}")
-        return cursor.rowcount  # 返回受影响的行数
+                return cursor.rowcount
+        finally:
+            conn.close()
 
     def read(
             self,
@@ -112,24 +258,7 @@ class DatabaseManager:
             page_size: int = None,
             distinct_columns: str = None
     ) -> list:
-        """
-        从数据库读取数据
-        
-        Args:
-            table: 表名
-            columns: 要查询的列名，默认为 '*'
-            where: 查询条件字典，支持多种查询方式：
-                   - 普通等值查询: {'column': value}
-                   - LIKE 查询: {'column': (value, 'like')}
-                   - 范围查询: {'column': {'between': [value1, value2]}}
-                   - 大于查询: {'column': (value, '>')}
-            page: 页码，用于分页查询
-            page_size: 每页记录数
-            distinct_columns: 需要去重的列名
-            
-        Returns:
-            list: 查询结果列表，每个元素为一个字典
-        """
+        """从数据库读取数据"""
         where_clause = ''
         values = []
 
@@ -165,80 +294,53 @@ class DatabaseManager:
             sql += f" LIMIT %s OFFSET %s"
             values.extend([page_size, offset])
 
-        with self.connect() as connection:
-            with connection.cursor() as cursor:
+        conn = self.get_connection()
+        try:
+            with conn.cursor() as cursor:
                 cursor.execute(sql, tuple(values))
                 result = cursor.fetchall()
                 logging.info(
                     f"Read from {table}, columns: {columns}, where: {where}, page: {page}, page_size: {page_size}, distinct_columns: {distinct_columns}"
                 )
-
-        return result
+                return result
+        finally:
+            conn.close()
 
     def update(self, table: str, data: dict, where: dict) -> int:
-        """
-        更新数据库记录
-        
-        Args:
-            table: 表名
-            data: 要更新的数据字典，键为列名，值为新的值
-            where: 更新条件字典，指定要更新哪些记录
-            
-        Returns:
-            int: 受影响的行数
-        """
+        """更新数据库记录"""
         set_clause = ', '.join(f"{col}=%s" for col in data.keys())
         where_clause = ' AND '.join(f"{col}=%s" for col in where.keys())
         values = tuple(data.values()) + tuple(where.values())
-
         sql = f"UPDATE {table} SET {set_clause} WHERE {where_clause}"
 
-        with self.connect() as connection:
-            with connection.cursor() as cursor:
+        conn = self.get_connection()
+        try:
+            with conn.cursor() as cursor:
                 cursor.execute(sql, values)
-                connection.commit()
+                conn.commit()
                 logging.info(f"Updated {table} with data: {data}, where: {where}")
-        return cursor.rowcount
+                return cursor.rowcount
+        finally:
+            conn.close()
 
     def delete(self, table: str, where: dict) -> int:
-        """
-        删除数据库记录
-        
-        Args:
-            table: 表名
-            where: 删除条件字典，指定要删除哪些记录
-            
-        Returns:
-            int: 受影响的行数
-        """
+        """删除数据库记录"""
         where_clause = ' AND '.join(f"{col}=%s" for col in where.keys())
         values = tuple(where.values())
-
         sql = f"DELETE FROM {table} WHERE {where_clause}"
 
-        with self.connect() as connection:
-            with connection.cursor() as cursor:
+        conn = self.get_connection()
+        try:
+            with conn.cursor() as cursor:
                 cursor.execute(sql, values)
-                connection.commit()
+                conn.commit()
                 logging.info(f"Deleted from {table}, where: {where}")
-        return cursor.rowcount
+                return cursor.rowcount
+        finally:
+            conn.close()
 
     def batch_create(self, table: str, data_list: list) -> bool:
-        """
-        批量插入数据
-        
-        Args:
-            table: 表名
-            data_list: 要插入的数据列表，每个元素为一个字典
-                      所有字典必须具有相同的键
-            
-        Returns:
-            bool: 插入是否成功
-            
-        Note:
-            - 如果 data_list 为空，直接返回 True
-            - 所有记录必须具有相同的字段结构
-        """
+        """批量插入数据"""
         if not data_list:
             return True
 
@@ -248,64 +350,50 @@ class DatabaseManager:
         sql = f"INSERT INTO {table} ({columns_str}) VALUES ({placeholders})"
         values = [tuple(data[col] for col in columns) for data in data_list]
 
+        conn = self.get_connection()
         try:
-            with self.connect() as connection:
-                with connection.cursor() as cursor:
-                    cursor.executemany(sql, values)
-                connection.commit()
-            return True
+            with conn.cursor() as cursor:
+                cursor.executemany(sql, values)
+                conn.commit()
+                return True
         except Exception as e:
             logging.error(f"批量插入数据时出错: {str(e)}")
-            return False 
+            return False
+        finally:
+            conn.close()
 
     def execute_sql(self, sql: str, params: tuple = None, fetch: bool = True) -> tuple:
-        """
-        执行自定义 SQL 语句
-        
-        Args:
-            sql: SQL 语句
-            params: SQL 参数，用于预处理语句，防止 SQL 注入
-            fetch: 是否获取结果，True 表示 SELECT 语句，False 表示 UPDATE/INSERT/DELETE 等
-            
-        Returns:
-            tuple: (是否成功, 结果/错误信息)
-                - SELECT 语句返回 (True, results)
-                - 其他语句返回 (True, affected_rows)
-                - 出错时返回 (False, error_message)
-                
-        Example:
-            # SELECT 查询
-            success, results = db.execute_sql(
-                "SELECT * FROM users WHERE age > %s",
-                params=(18,)
-            )
-            
-            # UPDATE 操作
-            success, affected = db.execute_sql(
-                "UPDATE users SET status = %s WHERE id = %s",
-                params=('active', 1),
-                fetch=False
-            )
-        """
+        """执行自定义 SQL 语句"""
+        conn = self.get_connection()
         try:
-            with self.connect() as connection:
-                with connection.cursor() as cursor:
-                    # 执行 SQL
-                    cursor.execute(sql, params)
+            with conn.cursor() as cursor:
+                cursor.execute(sql, params)
+                
+                if fetch:
+                    results = cursor.fetchall()
+                    logging.info(f"执行 SELECT 语句: {sql}, 获取到 {len(results)} 条记录")
+                    return True, results
+                else:
+                    conn.commit()
+                    affected_rows = cursor.rowcount
+                    logging.info(f"执行 SQL: {sql}, 影响 {affected_rows} 行")
+                    return True, affected_rows
                     
-                    if fetch:
-                        # SELECT 语句
-                        results = cursor.fetchall()
-                        logging.info(f"执行 SELECT 语句: {sql}, 参数: {params}, 获取到 {len(results)} 条记录")
-                        return True, results
-                    else:
-                        # 非 SELECT 语句
-                        connection.commit()
-                        affected_rows = cursor.rowcount
-                        logging.info(f"执行 SQL: {sql}, 参数: {params}, 影响 {affected_rows} 行")
-                        return True, affected_rows
-                        
         except Exception as e:
             error_msg = str(e)
-            logging.error(f"执行 SQL 出错: {sql}, 参数: {params}, 错误: {error_msg}")
-            return False, error_msg 
+            logging.error(f"执行 SQL 出错: {sql}, 错误: {error_msg}")
+            return False, error_msg
+        finally:
+            conn.close()
+
+    def warm_up(self):
+        """预热连接池"""
+        try:
+            connection = self.get_connection()
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+            connection.close()
+            logging.info("数据库连接池预热成功")
+        except Exception as e:
+            logging.error(f"数据库连接池预热失败: {str(e)}")
+            raise 
